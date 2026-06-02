@@ -1,0 +1,9 @@
+# Never commit real environment values
+.env
+
+# Local notes
+*.local.md
+
+# OS
+.DS_Store
+Thumbs.db
