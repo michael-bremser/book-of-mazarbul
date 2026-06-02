@@ -54,7 +54,7 @@ df -h
 Run this on the k3s-worker VM. Replace `<NODE_TOKEN>` with the token from k3s-control:
 
 ```bash
-  -curl -sfL https://get.k3s.io | K3S_URL=https://10.28.99.40:6443 K3S_TOKEN=<NODE_TOKEN> sh -s - agent --node-name k3s-worker
+  curl -sfL https://get.k3s.io | K3S_URL=https://10.28.99.40:6443 K3S_TOKEN=<NODE_TOKEN> sh -s - agent --node-name k3s-worker
 ```
 
 **Why each part:**
@@ -79,6 +79,7 @@ sudo kubectl label node k3s-worker node-role.kubernetes.io/worker=worker
 
 # Check nodes again
 sudo kubectl get nodes
+```
 
 ---
 
