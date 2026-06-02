@@ -1,8 +1,8 @@
 # Build Journal — Step 0.75: Provision Proxmox VMs
 
-**Date:** _fill in when complete_  
+**Date:** 6/1/26 - 6/2/26  
 **Nodes:** Nogrod (10.28.99.11), Belegost (10.28.99.12)  
-**Status:** [ ] Complete
+**Status:** [x] Complete
 
 ---
 
@@ -128,9 +128,6 @@ Name: pre-k3s-install
 This being my first deployment outside of learning in class, this has been a enlightening process. A lot of the skills that I learned from linux commands, tmux, and vim really get to come together finally. 
 I also noticed that the snapshot for the worker node went up to 7gb while the control node finished really quickly. Not sure why but I think its important to note.
 
-```
-# Paste relevant output here
-```
 
 ---
 
