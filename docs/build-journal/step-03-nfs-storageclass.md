@@ -1,6 +1,6 @@
 # Build Journal — Step 3: NFS StorageClass → Aglarond
 
-**Date:** _fill in when complete_  
+**Date:** 6/4/2026 
 **Node:** Gundabad (kubectl) + Aglarond (TrueNAS)  
 **Status:** [ ] Complete
 
@@ -74,9 +74,9 @@ sudo apt install nfs-common -y
 
 # Test the mount
 sudo mount -t nfs 10.28.11.10:/mnt/MainPool/k8s-pvs /mnt
-ls /mnt
+df -h | grep mnt
 
-# Unmount when verified
+Unmount when verified
 sudo umount /mnt
 ```
 
@@ -86,9 +86,9 @@ sudo umount /mnt
 
 ## Install the NFS Subdir External Provisioner
 
-We'll install it via Helm — your first Helm deployment. Helm is a package manager for Kubernetes. A Helm chart is a pre-packaged set of manifests with configurable values.
+We'll install it via Helm. Helm is a package manager for Kubernetes. A Helm chart is a pre-packaged set of manifests with configurable values.
 
-### Install Helm (on Gundabad if not already installed):
+### Install Helm:
 
 ```bash
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
