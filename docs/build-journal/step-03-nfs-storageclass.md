@@ -2,7 +2,7 @@
 
 **Date:** 6/4/2026 
 **Node:** Gundabad (kubectl) + Aglarond (TrueNAS)  
-**Status:** [ ] Complete
+**Status:** [x] Complete
 
 ---
 
@@ -98,8 +98,7 @@ helm version
 ### Add the NFS provisioner Helm repo:
 
 ```bash
-helm repo add nfs-subdir-external-provisioner \
-  https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/
+helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/
 helm repo update
 ```
 
@@ -115,6 +114,7 @@ kubectl create namespace nfs-provisioner
 helm install nfs-subdir-external-provisioner \
   nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
   --namespace nfs-provisioner \
+  --create-namespace \
   --set nfs.server=10.28.11.10 \
   --set nfs.path=/mnt/MainPool/k8s-pvs \
   --set storageClass.name=aglarond-nfs \
@@ -127,6 +127,16 @@ helm install nfs-subdir-external-provisioner \
 - `storageClass.name=aglarond-nfs` — the StorageClass name you'll reference in PVCs
 - `storageClass.defaultClass=true` — makes this the default StorageClass so PVCs without an explicit class get it automatically
 
+```
+#This is the output showing install complete
+NAME: nfs-subdir-external-provisioner
+LAST DEPLOYED: Thu Jun  4 10:40:42 2026
+NAMESPACE: nfs-provisioner
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+```
 ---
 
 ## Verification
@@ -166,7 +176,12 @@ Check it bound:
 ```bash
 kubectl get pvc nfs-test
 # STATUS should be Bound, not Pending
+# Actual Status
+#NAME       STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+#nfs-test   Bound    pvc-0e517f8d-47d0-4b93-a4c1-8ee9073844ff   1Gi        RWX            aglarond-nfs   <unset>                 11s
+
 ```
+
 
 Check a directory was created on Aglarond — in TrueNAS UI browse to `MainPool/k8s-pvs` and you should see a new subdirectory.
 
@@ -180,29 +195,24 @@ kubectl delete pvc nfs-test
 
 ## What I Observed
 
-_Fill in when you run it:_
-
-```
-# Paste actual output here
-```
 
 ---
 
 ## What I Learned
 
-_Fill in after completion. Examples:_
-- _What is the difference between static and dynamic provisioning?_
-- _What does ReadWriteMany vs ReadWriteOnce mean and when does it matter?_
-- _What happens to the data on Aglarond when a PVC is deleted?_
-- _What is Helm and how is it different from kubectl apply?_
+- _What is the difference between static and dynamic provisioning? 
+    Static Provisioning is done by the admin when they set PVs ahead of time. Dynamic provisioning is done by the provisioner pod that was installed when a PVC is submitted.
+- _What does ReadWriteMany vs ReadWriteOnce mean and when does it matter?
+   This sets access modes. Many means any pod can access the pv and once means only a single node can access. NFS supports ReadWriteMany which makes it a good option for workloads that schedule across many nodes. 
+- _What happens to the data on Aglarond when a PVC is deleted? 
+    It depends on the reclaim policy. The way I set it up here means that once the data is released it is deleted. If retain is used the previous claimaints data remains. The provisioner used here will keep with an archived prefix even when using the Delete policy.
+- _What is Helm and how is it different from kubectl apply? Helm runs on the workstation as a client binary. It uses kubectl and generates manifests that are applied to the cluster. Helm is a package manager. 
 
 ---
 
 ## Issues Encountered
 
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| | | |
+TrueNas UI doesn't show empty files so when I went to check that the test pvc has created a folder nothing will show up. I instead use kubectl describe to see if the path had been passed into the yaml and it confirmed that it was.
 
 ---
 
