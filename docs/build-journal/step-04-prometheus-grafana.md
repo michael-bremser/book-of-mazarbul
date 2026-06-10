@@ -1,8 +1,8 @@
 # Build Journal — Step 4: Prometheus + Grafana (Observability Stack)
 
-**Date:** _fill in when complete_  
+**Date:** 6/10/2026
 **Node:** Gundabad (kubectl)  
-**Status:** [ ] Complete
+**Status:** [x] Complete
 
 ---
 
@@ -38,9 +38,9 @@ You can't operate what you can't see. Deploying Prometheus first means:
 
 ## Pre-flight Checks
 
-- [ ] NFS StorageClass `aglarond-nfs` is the cluster default (`kubectl get storageclass`)
-- [ ] Helm is installed on Gundabad (`helm version`)
-- [ ] kubectl context is set to finai (`kubectl config current-context`)
+- [x] NFS StorageClass `aglarond-nfs` is the cluster default (`kubectl get storageclass`)
+- [x] Helm is installed on Gundabad (`helm version`)
+- [x] kubectl context is set to beleriand (`kubectl config current-context`)
 
 ---
 
@@ -134,29 +134,29 @@ The kube-prometheus-stack comes with built-in dashboards. Worth exploring:
 
 ## What I Observed
 
-_Fill in when you run it:_
+Helm post-install output
+``` bash
+#Get Grafana 'admin' user password by running:
 
-```
-# Paste actual output here
-```
+  kubectl --namespace monitoring get secrets kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
 
+#Access Grafana local instance:
+
+  export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=kube-prometheus-stack" -oname)
+  kubectl --namespace monitoring port-forward $POD_NAME 3000
+
+#Get your grafana admin user password by running:
+
+  kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+```
 ---
 
 ## What I Learned
 
-_Fill in after completion. Examples:_
 - _What is a ServiceMonitor and how does Prometheus discover what to scrape?_
 - _What is the difference between Prometheus scraping and push-based metrics?_
 - _What does kube-state-metrics expose that node-exporter doesn't?_
 - _What is Alertmanager and how does it relate to Prometheus alerts?_
-
----
-
-## Issues Encountered
-
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| | | |
 
 ---
 
