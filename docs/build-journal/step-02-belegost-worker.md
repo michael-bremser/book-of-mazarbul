@@ -22,7 +22,7 @@ When a node joins a k3s cluster it runs `k3s agent` instead of `k3s server`. The
 - Starts kube-proxy — handles network rules for Service routing on this node
 - Pulls and runs whatever pods the scheduler assigns to it
 
-The control plane (Nogrod) never runs your workloads. It just decides where they go and watches that they stay healthy. Belegost does the actual work.
+The control plane (Nogrod) never runs your workloads. It just decides where they go and watches that they stays healthy. Belegost does the actual work.
 
 ---
 
@@ -54,7 +54,7 @@ df -h
 Run this on the k3s-worker VM. Replace `<NODE_TOKEN>` with the token from k3s-control:
 
 ```bash
-  curl -sfL https://get.k3s.io | K3S_URL=https://10.28.99.40:6443 K3S_TOKEN=<NODE_TOKEN> sh -s - agent --node-name k3s-worker
+curl -sfL https://get.k3s.io | K3S_URL=https://10.28.99.40:6443 K3S_TOKEN=<NODE_TOKEN> sh -s - agent --node-name k3s-worker
 ```
 
 **Why each part:**
@@ -67,93 +67,81 @@ Run this on the k3s-worker VM. Replace `<NODE_TOKEN>` with the token from k3s-co
 
 ## Verification
 
-Run these from k3s-control (not from the worker):
+Run these from Gundabad or k3s-control:
 
 ```bash
 # Both nodes should show as Ready
-sudo kubectl get nodes
+kubectl get nodes
 
-# Worker should show no roles yet — that's normal
-# You can label it manually if you want
-sudo kubectl label node k3s-worker node-role.kubernetes.io/worker=worker
+# Worker shows no roles by default — label it for readability
+kubectl label node k3s-worker node-role.kubernetes.io/worker=worker
 
 # Check nodes again
-sudo kubectl get nodes
+kubectl get nodes
 ```
 
 ---
 
-## kubectl from Your Laptop
+## kubectl from Gundabad
 
-Rather than SSHing into k3s-control every time, set up kubectl on your laptop (or Gundabad):
+Rather than SSHing into k3s-control every time, set up kubectl on Gundabad:
 
 ```bash
 # On k3s-control, get the kubeconfig
 sudo cat /etc/rancher/k3s/k3s.yaml
 ```
 
-Copy that file to your local machine at `~/.kube/config` and change the server line from:
-```
-server: https://127.0.0.1:6443
-```
-to:
-```
-server: https://10.28.99.40:6443
-```
+Copy that file to Gundabad and save it as `~/.kube/k3s-beleriand.yaml`. Before merging, fix the server IP and rename all default entries to avoid collisions with existing cluster configs:
 
-Then verify from your laptop:
 ```bash
+# On k3s-control — fix the server IP before copying
+sudo cat /etc/rancher/k3s/k3s.yaml | sed 's/127.0.0.1/10.28.99.40/' > ~/k3s-beleriand.yaml
+
+# Copy to Gundabad
+scp user@10.28.99.40:~/k3s-beleriand.yaml ~/.kube/k3s-beleriand.yaml
+
+# Rename all default entries to avoid collision on merge
+sed -i 's/name: default/name: beleriand/g' ~/.kube/k3s-beleriand.yaml
+sed -i 's/cluster: default/cluster: beleriand/g' ~/.kube/k3s-beleriand.yaml
+sed -i 's/user: default/user: beleriand-admin/g' ~/.kube/k3s-beleriand.yaml
+
+# Merge with existing config
+KUBECONFIG=~/.kube/config:~/.kube/k3s-beleriand.yaml kubectl config view --flatten > ~/.kube/merged.yaml
+mv ~/.kube/merged.yaml ~/.kube/config
+
+# Manually verify the beleriand context points at the right cluster and user
+vim ~/.kube/config
+
+# Switch to the new context and verify
+kubectl config use-context beleriand
 kubectl get nodes
 ```
+
+> **Key lesson:** k3s always names its kubeconfig entries `default`. Always rename them before merging or you'll get silent collisions that are painful to debug. `default` is not a safe name for anything in a multi-cluster kubeconfig.
 
 ---
 
 ## What I Observed
 
-This is the first time I have had multiple clusters that I am adminstrating so instead of a fresh kube config I had to merge them together and that was tricky. I'll post the details in a seperate section.
+This is the first time I have had multiple clusters that I am administrating so instead of a fresh kube config I had to merge them together and that was tricky.
 
 ---
 
 ## What I Learned
 
-I rediscovered the power of the sed command. When merging the the new cluster into my existing config file I forgot to edit the new config file first and that caused a LOT of collisions. I'll post how I fixed it below. Basically I needed to use sed to change the control node address in the new config first. I then moved that new file onto my workstation and renamed all the uses of "default".
-I used the built in merge tool and made sure the new config file had the correct naming schemes. 
+I rediscovered the power of the sed command. When merging the new cluster into my existing config file I forgot to edit the new config file first and that caused a LOT of collisions. Basically I needed to use sed to change the control node address in the new config first. I then moved that new file onto my workstation and renamed all the uses of "default". I used the built in merge tool and made sure the new config file had the correct naming schemes.
+
 Amazing learning lesson! Default is going to always be put there so make sure to change it off that to avoid collisions.
-
-```bash
-# On k3s-control — fix the server IP before copying
-sudo cat /etc/rancher/k3s/k3s.yaml | sed 's/127.0.0.1/10.28.99.40/' > ~/k3s-finai.yaml
-
-# Copy to Gundabad
-scp user@10.28.99.40:~/k3s-finai.yaml ~/.kube/k3s-finai.yaml
-
-# Rename all default entries in the file to avoid collision
-sed -i 's/name: default/name: finai/g' ~/.kube/k3s-finai.yaml
-sed -i 's/cluster: default/cluster: finai/g' ~/.kube/k3s-finai.yaml
-sed -i 's/user: default/user: finai-admin/g' ~/.kube/k3s-finai.yaml
-
-# Merge with existing config
-KUBECONFIG=~/.kube/config:~/.kube/k3s-finai.yaml kubectl config view --flatten > ~/.kube/merged.yaml
-mv ~/.kube/merged.yaml ~/.kube/config
-
-# Manually fix the finai context in vim to point at the right cluster/user
-vim ~/.kube/config
-
-# Switch to the new context and verify
-kubectl config use-context finai
-kubectl get nodes
-```
 
 ---
 
 ## Issues Encountered
-Both nodes had the incorrect time and were not syncing to NTP correctly. 
-```bash
-sudo timedatectl set-ntp true
-sudo systemctl restart systemd-timesyncd
-sudo timedatectl set-timezone America/Los_Angeles
-timedatectl
-```
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Both nodes had incorrect time and were not syncing to NTP | NTP not enabled by default on fresh Ubuntu install | `sudo timedatectl set-ntp true && sudo systemctl restart systemd-timesyncd && sudo timedatectl set-timezone America/Los_Angeles` |
+| kubeconfig merge caused context collisions | k3s names all entries `default` — collided with existing cluster | Renamed all entries with sed before merging, then manually verified context pointed at correct cluster and user in vim |
+
 ---
 
 ## Notes
@@ -166,4 +154,4 @@ timedatectl
 
 ## Next Step
 
-Step 3 — Configure NFS StorageClass pointed at Aglarond
+[Step 3 — Configure NFS StorageClass pointed at Aglarond](step-03-nfs-storageclass.md)
