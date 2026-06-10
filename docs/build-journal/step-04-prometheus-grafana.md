@@ -154,9 +154,13 @@ Helm post-install output
 ## What I Learned
 
 - _What is a ServiceMonitor and how does Prometheus discover what to scrape?_
+A service monitor is a Kubernetes CRD that tells Prometheus what to scrape and how. It points at a Service and says "scrape this endpoint, on this port, at this interval." Prometheus doesnt talk to the kubelet to discover these, it watch the Kubernetes API for ServiceMonitor objects and builds it scrape config from them. The kubelet is one of the thing being scraped, not the discovery mechanism.
 - _What is the difference between Prometheus scraping and push-based metrics?_
+Prometheus pulls metrics on a schedule by hitting /metrics endpoints. Push-based systems have the application send metrics to the collector. The tradeoff is that scraping means Prometheus controls the interval and can detect when a target goes down, but it requires targets to expose an HTTP endpoint.
 - _What does kube-state-metrics expose that node-exporter doesn't?_
+node-exporter exposes hardware and OS metrics like cpu usage, memory, disk i/o, etc on the actual node. kube-state-metrics exposes Kubernetes object state, like how many replicas are up, is the pod in a crash loop, is this PVC bound. Machine metrics vs cluster objects.
 - _What is Alertmanager and how does it relate to Prometheus alerts?_
+Prometheus evaluates alerting rules and fires alerts to AlertManager. AlertManager handles routing, silencing, sending notifications. Prometheus is the when, AlertManager is the what to do with the alert.
 
 ---
 
