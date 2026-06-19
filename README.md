@@ -1,4 +1,4 @@
-# 🧠 Private AI Financial Assistant — Homelab K8s Stack
+# Private AI Financial Assistant — Homelab K8s Stack
 
 > A fully local, air-gapped AI stack for personal finance analysis. Built on a k3s Kubernetes cluster running in Proxmox VMs across a homelab cluster. No data leaves the network.
 
@@ -103,19 +103,23 @@ Infrastructure nodes follow a Middle-earth Dwarf lore theme. Personal devices an
 You drop a PDF (from laptop, phone, or drop folder)
       │
       ▼
-n8n detects it — file watch / webhook / cron / manual
+n8n moves it to staging/ on Aglarond  ── daytime: does NOT wake Gundabad
+      │
+      ▼  nightly batch cron — skipped if staging/ is empty
+n8n wakes Gundabad via pfSense WoL API → polls Ollama readiness
       │
       ▼
-n8n parses + chunks the document
+n8n parses + chunks each pending document
       │
-      ▼ (queued with retry if Ollama offline)
+      ▼
 Ollama generates embeddings
       │
       ▼
 ChromaDB stores vectors on Aglarond (NFS PVC)
+file moves staging/ → archive/   (failures stay in staging/ for retry)
       │
       ▼
-You ask a question in Open WebUI
+You ask a question in Open WebUI  ── interactive: wakes Gundabad on demand
       │
       ▼
 ChromaDB retrieves relevant chunks
@@ -129,34 +133,36 @@ Answer rendered in Open WebUI
 
 ---
 
-## Offline / Queue Behavior
+## Power Management & Queue Behavior
 
-Gundabad running Ollama is not always-on. The stack is designed for this:
+Gundabad (GPU worker) is not always-on and is also the daily-driver workstation. n8n actively manages its power state across the VLAN boundary rather than passively waiting for it to come online.
 
-- ChromaDB, n8n, and Open WebUI run continuously on k3s-worker
-- n8n queues ingestion jobs with configurable retry when Ollama is unreachable
-- A k8s readiness probe on the Ollama pod ensures n8n only retries once the model is fully loaded
-- On Gundabad boot, the backlog processes automatically with no manual intervention
+- **Cross-VLAN wake:** n8n (VLAN 99) can't broadcast a WoL magic packet to Gundabad (VLAN 20) — magic packets don't route. Instead n8n calls the pfSense REST API on Khazad-dûm, which originates the packet directly on VLAN 20. No relay VM. (See ADR-006.)
+- **Interactive queries** wake Gundabad on demand, poll Ollama until the model is ready, then dispatch. Latency includes cold-start boot time — the accepted cost of an off-by-default GPU.
+- **Idle-timeout shutdown:** Gundabad shuts down only after the queue has been empty for a continuous window, with a minimum-uptime guard so a fresh boot isn't caught immediately. This avoids power-cycle churn from bursty work. (See ADR-007.)
+- **Document ingestion is deferred to a nightly batch.** Dropped PDFs land in a staging folder on Aglarond during the day; a single overnight run processes them all. Ingestion is asynchronous and eventually-consistent — a document is queryable the next morning, not on drop. The batch run skips entirely when nothing is pending.
 
-You can trigger pipelines from a laptop or phone at any time via webhook to n8n. Documents will be indexed the next time Gundabad is on.
+The staging folder is the ingestion queue: no database, durable, and visible — list the directory to see exactly what's waiting. Files that fail mid-batch stay in staging and retry automatically on the next night's run.
 
 ---
 
 ## Build Phases
 
-### Phase 0 — Infrastructure ✅ Complete
+### Phase 0 — Infrastructure — Complete
 - Proxmox VMs provisioned: k3s-control on Nogrod, k3s-worker on Belegost
 - VM specs: Ubuntu 24.04 LTS, 4 vCPU, 8–12GB RAM, 40GB disk
 - Network: VLAN 99 (Valinor), static IPs on 10.28.99.x
 
-### Phase 1 — Core Stack 🔄 In Progress
-- k3s control plane on k3s-control ✅
-- k3s worker on k3s-worker ✅
-- kubectl configured on Gundabad ✅
+### Phase 1 — Core Stack — In Progress
+- k3s control plane on k3s-control — done
+- k3s worker on k3s-worker — done
+- kubectl configured on Gundabad — done
 - NFS StorageClass pointed at Aglarond
 - Gundabad joined as bare metal GPU worker
 - Ollama, ChromaDB, Open WebUI, n8n deployed
 - nginx Ingress + local DNS via Khazad-dûm
+- Cross-VLAN WoL via pfSense REST API — Gundabad power-on from n8n (ADR-006)
+- Idle-timeout shutdown + nightly deferred batch ingestion (ADR-007)
 
 ### Phase 2 — Observability
 - Prometheus + Grafana
@@ -195,12 +201,15 @@ You can trigger pipelines from a laptop or phone at any time via webhook to n8n.
 │   │   ├── ADR-002-nginx-over-traefik.md
 │   │   ├── ADR-003-vms-over-bare-metal.md
 │   │   ├── ADR-004-statefulset-decisions.md
-│   │   └── ADR-005-nfs-storage-backend.md
+│   │   ├── ADR-005-nfs-storage-backend.md
+│   │   ├── ADR-006-cross-vlan-wol-pfsense-api.md
+│   │   └── ADR-007-deferred-batch-ingestion.md
 │   └── build-journal/               # Step-by-step build notes
 │       ├── step-00-75-proxmox-vms.md
 │       ├── step-01-k3s-control-plane.md
 │       ├── step-02-belegost-worker.md
-│       └── step-03-nfs-storageclass.md
+│       ├── step-03-nfs-storageclass.md
+│       └── step-08-wol-power-management.md
 ├── manifests/
 │   ├── namespaces/
 │   ├── storage/                     # StorageClass, PV, PVC
@@ -218,6 +227,11 @@ You can trigger pipelines from a laptop or phone at any time via webhook to n8n.
 ## Architecture Decisions
 
 All major decisions are documented as Architecture Decision Records in `/docs/adr/`. Each ADR captures the context, the options considered, the decision made, and the reasoning. See [ADR-001](docs/adr/ADR-001-k3s-over-k8s.md) to start.
+
+Recent additions:
+
+- [ADR-006](docs/adr/ADR-006-cross-vlan-wol-pfsense-api.md) — Cross-VLAN Wake-on-LAN via pfSense REST API
+- [ADR-007](docs/adr/ADR-007-deferred-batch-ingestion.md) — Deferred batch ingestion & idle-timeout GPU power management
 
 ---
 
@@ -244,6 +258,10 @@ Step-by-step build notes live in `/docs/build-journal/`. Each entry covers what 
 | Prometheus + Grafana | Metrics, dashboards, alerting |
 | Cloudflare Tunnel | Secure external access, zero open ports |
 | GitOps + Flux | Phase 4 migration |
+| Cross-VLAN WoL via firewall API | pfSense REST API → Gundabad power-on |
+| Async / eventually-consistent pipeline | Nightly deferred batch ingestion |
+| Scheduled workflows & idle-timeout control loops | n8n cron workflows for power lifecycle |
+| API auth scoping & least privilege | pfSense API user scoped to WoL endpoint only |
 
 ---
 
