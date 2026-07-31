@@ -1,14 +1,19 @@
-# 🧠 Private AI Financial Assistant — Homelab K8s Stack
+# 🧠 Book of Mazarbul — Self-Hosted AI Stack
 
-> A fully local, air-gapped AI stack for personal finance analysis. Built on a k3s Kubernetes cluster running in Proxmox VMs across a homelab cluster. No data leaves the network.
+> A private, local-first AI stack for personal use — financial analysis, homelab monitoring, and other focused tasks — running against a self-hosted LLM. No data leaves the network.
 
 ---
 
 ## What This Is
 
-A production-pattern Kubernetes deployment of a RAG (Retrieval-Augmented Generation) pipeline for personal financial data. Bank statements, credit card PDFs, and budgets are ingested, embedded, and stored locally. A local LLM answers questions about them — privately, without any cloud API.
+A generalist local AI assistant, deliberately scoped by task rather than by a
+single use case. It started as a RAG pipeline for personal finance and has
+broadened: the inference layer comes first and is built to support several
+task-focused areas over time (financial document analysis, homelab
+observability, general Q&A), rather than being hard-wired to one pipeline.
 
-Built as a hands-on DevOps learning project aligned with the [Kubecraft](https://kubecraft.dev) career accelerator curriculum.
+Built as a hands-on DevOps learning project aligned with the
+[Kubecraft](https://kubecraft.dev) career accelerator curriculum.
 
 ---
 
@@ -16,171 +21,117 @@ Built as a hands-on DevOps learning project aligned with the [Kubecraft](https:/
 
 Two goals:
 
-1. **Daily utility** — a private financial assistant that actually gets used, with real data, answering real questions
-2. **Career development** — every component is a deliberate teaching moment. This isn't a tutorial clone. Architecture decisions are documented, rationale is written down, and the build journal captures what broke and why
+1. **Daily utility** — a private assistant that actually gets used, starting
+   with inference you control end to end
+2. **Career development** — every component is a deliberate teaching moment.
+   Architecture decisions are documented, rationale is written down, and the
+   build journal captures what broke and why
 
 ---
 
 ## Naming Convention
 
-Infrastructure nodes follow a Middle-earth Dwarf lore theme. Personal devices and workstations follow Middle-earth naming broadly. Kubernetes services use component names only.
+Infrastructure nodes follow a Middle-earth Dwarf lore theme. Personal devices
+and workstations follow Middle-earth naming broadly. Kubernetes services use
+component names only.
 
 ---
 
-## Stack
+## Architecture
 
-| Component | Role | K8s Primitive |
-|-----------|------|---------------|
-| [Ollama](https://ollama.com) | Local LLM inference (GPU) | StatefulSet |
-| [ChromaDB](https://www.trychroma.com) | Vector store (RAG memory) | StatefulSet |
-| [Open WebUI](https://github.com/open-webui/open-webui) | Chat interface | Deployment |
-| [n8n](https://n8n.io) | Ingestion pipeline & automation | StatefulSet |
-| nginx Ingress | Traffic routing | DaemonSet |
-| Prometheus | Metrics collection | Deployment |
-| Grafana | Dashboards & alerting | Deployment |
-| Cloudflare Tunnel | Remote webhook access (Phase 3) | — |
+**Inference is external to the cluster, not a workload in it.** Gundabad is a
+daily-driver workstation, not a dedicated, always-on machine — modeling it as
+a Kubernetes node produces `NotReady` churn and eviction noise for no benefit.
+Instead:
+
+- **Ollama runs bare metal** on Gundabad (Manjaro, CUDA, RTX 3080 Ti). No GPU
+  passthrough into a VM, no in-cluster GPU scheduling.
+- **beleriand reaches it as an ExternalName Service.** From the cluster's
+  point of view, inference is an external dependency it consumes, the same
+  category as a third-party API — just self-hosted and on the LAN.
+- **Persistent data and backups land on Aglarond over NFS**, independent of
+  both the cluster and Gundabad.
+
+This is a deliberate departure from an earlier design (see the superseded
+note on ADR-003) that ran Ollama as a tainted, GPU-scheduled StatefulSet on a
+Gundabad joined to the cluster. That path is preserved, not deleted, as a
+timeboxed post-exam learning exercise — see
+`docs/build-journal/step-05-gundabad-gpu-worker.md`.
+
+### Model tiers
+
+| Tier | Model | Quant | Role |
+|------|-------|-------|------|
+| Default | 14B-class (Qwen3-14B) | Q4_K_M | Daily driver, fully GPU-resident |
+| Experiment | 30B-class MoE | Q4_K_M | `llama.cpp --n-cpu-moe`, routed experts in system RAM |
+
+The MoE tier is not a default — it is bandwidth-bound on Gundabad's DDR4 and,
+with zero swap configured, a footprint misjudgment risks the desktop session
+rather than degrading gracefully. See `docs/sizing.md` for the VRAM/KV-cache
+arithmetic behind both tiers.
 
 ---
 
 ## Infrastructure
 
-| Name | Thing | Hardware | Role |
-|------|-------|----------|------|
-| **Nogrod** | Proxmox node | Lenovo M70q · i3-10100T · 32GB DDR4 | Hypervisor — hosts k3s-control |
-| **Belegost** | Proxmox node | Lenovo M70q · i3-10100T · 32GB DDR4 | Hypervisor — hosts k3s-worker |
-| **k3s-control** | k3s VM on Nogrod | 4 vCPU · 8GB RAM · 40GB disk · Ubuntu 24.04 | k3s control plane · 10.28.99.40 |
-| **k3s-worker** | k3s VM on Belegost | 4 vCPU · 12GB RAM · 40GB disk · Ubuntu 24.04 | k3s worker — general workloads · 10.28.99.41 |
-| **Gundabad** | Workstation — bare metal GPU worker | Ryzen 5600X · RTX 3080 Ti · 64GB DDR4 | k3s worker — GPU (Ollama only) / daily driver |
-| **Aglarond** | TrueNAS | ZFS · NFS export | Persistent storage — all PVCs |
-| **Khazad-dûm** | pfSense | — | Router, firewall, internal DNS |
+| Name | Role | Notes |
+|------|------|-------|
+| **beleriand** | k3s production cluster | Two nodes: `k3s-control` (10.28.99.40), `k3s-worker` (10.28.99.41). Consumes inference, does not serve it. |
+| **Gundabad** | Workstation — bare-metal inference host | Ryzen 5600X · RTX 3080 Ti (12GB VRAM) · 32GB DDR4 · Manjaro. Daily driver, not always-on, not a cluster member. |
+| **Aglarond** | TrueNAS on the Proxmox cluster | ZFS pool, NFS export. `aglarond-nfs` is (one of two, currently — see `docs/findings-2026-07-31.md`) default StorageClasses on beleriand. |
 
 ---
 
-## Cluster Topology
+## Data Flow (current scope)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Proxmox Cluster                          │
-│                                                                 │
-│  Nogrod (10.28.99.11)              Belegost (10.28.99.12)      │
-│  ┌───────────────────────┐         ┌───────────────────────┐   │
-│  │  Proxmox Host         │         │  Proxmox Host         │   │
-│  │  ┌─────────────────┐  │         │  ┌─────────────────┐  │   │
-│  │  │  k3s-control VM │  │         │  │  k3s-worker VM  │  │   │
-│  │  │  Control Plane  │  │         │  │  Worker Node    │  │   │
-│  │  │  10.28.99.40    │  │         │  │  10.28.99.41    │  │   │
-│  │  └─────────────────┘  │         │  │  ChromaDB       │  │   │
-│  └───────────────────────┘         │  │  Open WebUI     │  │   │
-│                                    │  │  n8n            │  │   │
-│                                    │  │  nginx Ingress  │  │   │
-│                                    │  │  Prometheus     │  │   │
-│                                    │  │  Grafana        │  │   │
-│                                    │  └─────────────────┘  │   │
-│                                    └───────────────────────┘   │
-│                                                                 │
-│  Gundabad (bare metal GPU worker)                               │
-│  Ryzen 5600X · RTX 3080 Ti · 64GB DDR4                        │
-│  Ollama only — tainted, not always-on                           │
-└─────────────────────────────────────────────────────────────────┘
-                             │
-                             │ NFS
-                             ▼
-                  Aglarond (TrueNAS)
-                  ZFS persistent storage
-                  All PVCs backed here
-                             │
-                  DNS & routing via
-                  Khazad-dûm (pfSense)
+You ask a question (Open WebUI, or direct API call)
+      │
+      ▼
+Request reaches Gundabad — bare-metal Ollama, CUDA, RTX 3080 Ti
+      │
+      ▼
+Ollama generates a response
+      │
+      ▼
+Answer returned to the caller
 ```
 
-**Key design principle:** compute and storage are fully decoupled. The k3s cluster can be rebuilt from scratch without touching data on Aglarond. The hypervisor layer is transparent to the cluster — swap Proxmox for anything else without changing a single manifest.
+Retrieval-augmented pieces (ChromaDB, ingestion via n8n) are not yet built.
+They remain on the board as task-focused extensions — see Scope below — not
+as scheduled work.
 
 ---
 
-## Data Flow
+## Offline / Availability Behavior
 
-```
-You drop a PDF (from laptop, phone, or drop folder)
-      │
-      ▼
-n8n detects it — file watch / webhook / cron / manual
-      │
-      ▼
-n8n parses + chunks the document
-      │
-      ▼ (queued with retry if Ollama offline)
-Ollama generates embeddings
-      │
-      ▼
-ChromaDB stores vectors on Aglarond (NFS PVC)
-      │
-      ▼
-You ask a question in Open WebUI
-      │
-      ▼
-ChromaDB retrieves relevant chunks
-      │
-      ▼
-Ollama generates answer with context
-      │
-      ▼
-Answer rendered in Open WebUI
-```
+Gundabad is not always-on. Anything that depends on inference must tolerate
+it being unreachable:
+
+- beleriand's ExternalName Service resolves to Gundabad; when Gundabad is
+  off, requests fail rather than queue — there is currently no queuing layer
+  (n8n) in front of it
+- No readiness/liveness probing exists yet across the ExternalName boundary;
+  this is one of the monitoring decisions still open (Bucket C — see the
+  project's replan notes)
 
 ---
 
-## Offline / Queue Behavior
+## Scope
 
-Gundabad running Ollama is not always-on. The stack is designed for this:
+**Built or in progress:**
+- Bare-metal Ollama on Gundabad, GPU-resident 14B-class inference
+- ExternalName consumption pattern from beleriand
+- NFS-backed persistent storage on Aglarond
+- Prometheus + Grafana (kube-prometheus-stack) on beleriand
 
-- ChromaDB, n8n, and Open WebUI run continuously on k3s-worker
-- n8n queues ingestion jobs with configurable retry when Ollama is unreachable
-- A k8s readiness probe on the Ollama pod ensures n8n only retries once the model is fully loaded
-- On Gundabad boot, the backlog processes automatically with no manual intervention
-
-You can trigger pipelines from a laptop or phone at any time via webhook to n8n. Documents will be indexed the next time Gundabad is on.
-
----
-
-## Build Phases
-
-### Phase 0 — Infrastructure ✅ Complete
-- Proxmox VMs provisioned: k3s-control on Nogrod, k3s-worker on Belegost
-- VM specs: Ubuntu 24.04 LTS, 4 vCPU, 8–12GB RAM, 40GB disk
-- Network: VLAN 99 (Valinor), static IPs on 10.28.99.x
-
-### Phase 1 — Core Stack 🔄 In Progress
-- k3s control plane on k3s-control ✅
-- k3s worker on k3s-worker ✅
-- kubectl configured on Gundabad ✅
-- NFS StorageClass pointed at Aglarond
-- Gundabad joined as bare metal GPU worker
-- Ollama, ChromaDB, Open WebUI, n8n deployed
-- nginx Ingress + local DNS via Khazad-dûm
-
-### Phase 2 — Observability
-- Prometheus + Grafana
-- Ollama GPU utilisation metrics
-- n8n job success/failure alerting
-- PVC storage usage dashboards
-- Readiness and liveness probes on all services
-
-### Phase 3 — Remote Access
-- Cloudflare Tunnel exposing n8n webhook endpoint only
-- Trigger ingestion pipelines from anywhere
-- Ollama, ChromaDB, Open WebUI remain fully internal
-- Zero open ports on the router
-
-### Phase 4 — GitOps Migration
-- Migrate stack to Flux CD
-- Cluster state fully defined in Git
-- No manual kubectl apply or helm install
-- Aligned with Kubecraft HomelabOS curriculum
-
-### Phase 5 — Future Consideration
-- Evaluate Talos Linux as hypervisor replacement
-- Immutable, API-driven OS purpose-built for Kubernetes nodes
-- Migration path: reprovision VMs, rejoin nodes — manifests unchanged
+**On the board, not scheduled:**
+- Additional task-focused areas (financial document RAG, homelab
+  observability queries) built against the same inference layer
+- ChromaDB, n8n, Open WebUI, Cloudflare Tunnel — useful if/when a given task
+  area needs them, not committed to as a fixed pipeline
+- GitOps migration via Flux (Flux is not yet bootstrapped on beleriand — it
+  currently reconciles a separate cluster, `learning`, via a different repo)
 
 ---
 
@@ -191,39 +142,34 @@ You can trigger pipelines from a laptop or phone at any time via webhook to n8n.
 ├── README.md
 ├── docs/
 │   ├── adr/                         # Architecture Decision Records
-│   │   ├── ADR-001-k3s-over-k8s.md
-│   │   ├── ADR-002-nginx-over-traefik.md
-│   │   ├── ADR-003-vms-over-bare-metal.md
-│   │   ├── ADR-004-statefulset-decisions.md
-│   │   └── ADR-005-nfs-storage-backend.md
-│   └── build-journal/               # Step-by-step build notes
-│       ├── step-00-75-proxmox-vms.md
-│       ├── step-01-k3s-control-plane.md
-│       ├── step-02-belegost-worker.md
-│       └── step-03-nfs-storageclass.md
-├── manifests/
-│   ├── namespaces/
-│   ├── storage/                     # StorageClass, PV, PVC
-│   ├── ollama/
-│   ├── chroma/
-│   ├── open-webui/
-│   ├── n8n/
-│   ├── ingress/
-│   └── observability/
-└── scripts/
+│   ├── build-journal/               # Step-by-step build notes
+│   ├── sizing.md                    # VRAM/KV-cache/model-tier arithmetic
+│   ├── findings-2026-07-31.md       # Known defects found during the replan
+│   └── monitoring-options.md        # Monitoring facts, not decisions
+├── manifests/                       # Kubernetes manifests (none written yet)
+└── scripts/                         # Install scripts, systemd units, benchmarks
 ```
 
 ---
 
 ## Architecture Decisions
 
-All major decisions are documented as Architecture Decision Records in `/docs/adr/`. Each ADR captures the context, the options considered, the decision made, and the reasoning. See [ADR-001](docs/adr/ADR-001-k3s-over-k8s.md) to start.
+All major decisions are documented as Architecture Decision Records in
+`/docs/adr/`. Each ADR captures the context, the options considered, the
+decision made, and the reasoning. Start at
+[ADR-001](docs/adr/ADR-001-k3s-over-k8s.md).
+
+Note: ADR-003 and the Ollama section of ADR-004 predate the shift to
+bare-metal inference and are marked superseded in place — the historical
+reasoning is kept, not deleted.
 
 ---
 
 ## Build Journal
 
-Step-by-step build notes live in `/docs/build-journal/`. Each entry covers what was done, what was learned, and what broke. Written during the build — not after.
+Step-by-step build notes live in `/docs/build-journal/`. Each entry covers
+what was done, what was learned, and what broke. Written during the build,
+not after.
 
 ---
 
@@ -231,29 +177,14 @@ Step-by-step build notes live in `/docs/build-journal/`. Each entry covers what 
 
 | Concept | Where |
 |---------|-------|
-| VM isolation of cluster from hypervisor | k3s-control + k3s-worker in Proxmox |
-| StatefulSet vs Deployment | ChromaDB, n8n, Ollama vs Open WebUI |
-| Taints & Tolerations | GPU node scheduling for Ollama on Gundabad |
-| NodeSelector / Affinity | Workload placement |
+| VM isolation of cluster from hypervisor | beleriand's control/worker nodes |
+| ExternalName Services | Cluster consumption of an out-of-cluster dependency |
+| NodeSelector / Affinity, Taints & Tolerations, GPU device plugin | `step-05` experiment (timeboxed, not production) |
 | PersistentVolume + PVC | NFS-backed storage on Aglarond |
-| ClusterIP Services | Internal DNS between services |
-| Ingress + TLS | nginx Ingress controller |
-| DaemonSet | NVIDIA device plugin, nginx Ingress |
-| ConfigMap + Secret | Service configuration, credentials |
-| Readiness / Liveness Probes | Ollama model-ready detection |
 | Prometheus + Grafana | Metrics, dashboards, alerting |
-| Cloudflare Tunnel | Secure external access, zero open ports |
-| GitOps + Flux | Phase 4 migration |
+| SOPS + age | Secret encryption at rest in Git |
+| GitOps + Flux | Not yet bootstrapped on beleriand — future work |
 
 ---
 
-## Network
-
-- **Router/Firewall:** Khazad-dûm (pfSense)
-- **Internal DNS:** `open-webui.local`, `n8n.local`, `grafana.local`
-- **VLANs:** Cluster nodes on V99 (Valinor)
-- **No internet egress** from cluster workloads
-
----
-
-*Built with [Kubecraft](https://kubecraft.dev). All financial data stays local.*
+*Built with [Kubecraft](https://kubecraft.dev). All data stays local.*
