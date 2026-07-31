@@ -35,6 +35,8 @@ The key question for each service: *does this pod need to remember who it is acr
 
 ### Ollama → StatefulSet
 
+> **Superseded 2026-07-31.** Ollama no longer runs in the cluster at all. It runs bare metal on Gundabad and is consumed as an external dependency via an ExternalName Service. See the replan context in `docs/sizing.md` and the pending ADR superseding ADR-003. The section below is kept for history, not as current design.
+
 Ollama downloads and stores large model files (several GB each) to a local volume. If the pod is recreated with a new identity and a fresh volume, it downloads the model again on every restart — slow and wasteful. A StatefulSet with a PVC means the model files persist across pod restarts. The pod always comes back as `ollama-0` with the same volume attached.
 
 Additionally, Ollama runs on Gundabad (the GPU worker node) via a taint/toleration. A stable pod identity makes scheduling predictable.
