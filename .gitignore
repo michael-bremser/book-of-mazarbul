@@ -1,6 +1,13 @@
 # Never commit real environment values
 .env
 
+# Secrets — SOPS-encrypted files are fine, raw keys are not
+*.agekey
+age.txt
+*.pem
+*.key
+!*.pub
+
 # Local notes
 *.local.md
 
