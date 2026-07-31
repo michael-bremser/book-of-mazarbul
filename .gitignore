@@ -11,6 +11,10 @@ age.txt
 # Local notes
 *.local.md
 
+# Generated benchmark output
+scripts/bench-runs/
+scripts/bench-results.csv
+
 # OS
 .DS_Store
 Thumbs.db
