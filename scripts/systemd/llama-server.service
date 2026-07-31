@@ -1,0 +1,45 @@
+# DRAFTED, NOT INSTALLED. This file lives here for review, not in /etc.
+# Copying it into /etc/systemd/system/ and running `systemctl enable` is
+# Bucket C, along with everything else that runs the MoE experiment lane —
+# see docs/sizing.md for why (SwapTotal is 0 on Gundabad; this unit's
+# MemoryMax/MemoryHigh exist specifically so an overrun kills this service
+# instead of the kernel OOM killer picking a victim from the desktop
+# session, but that protection should be *observed working* once, under
+# supervision, before it's trusted unattended).
+#
+# Deliberately not enabled at boot — start manually for a timed experiment:
+#   systemctl --user start llama-server   (if installed as a user unit)
+# or with sudo if installed system-wide. Stop it when done:
+#   systemctl --user stop llama-server
+#
+# --n-cpu-moe below is a placeholder. The right value depends on how many
+# MoE layers fit in ~10GB of free VRAM alongside the desktop — measure with
+# scripts/bench-model.sh and tune before relying on this number.
+#
+# Memory ceiling reasoning: model weights are ~17.3GiB (30B-A3B Q4_K_M,
+# mostly resident in system RAM since only some layers offload to GPU).
+# Gundabad has ~31.25GiB total, 0 swap. MemoryHigh=20G / MemoryMax=23G
+# leaves ~8GB of headroom for the live desktop session even in the worst
+# case — the unit gets killed before that headroom is touched.
+
+[Unit]
+Description=llama.cpp server — Qwen3-30B-A3B MoE experiment lane (NOT for daily use)
+After=network.target
+
+[Service]
+Type=simple
+User=michael
+ExecStart=/home/michael/bin/llama.cpp/current/llama-server \
+  -m /media/SSD_1/llm-models/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf \
+  --host 127.0.0.1 --port 8081 \
+  -ngl 99 \
+  --n-cpu-moe 20 \
+  -c 8192
+Restart=no
+MemoryHigh=20G
+MemoryMax=23G
+OOMPolicy=kill
+
+# No [Install] WantedBy target on purpose — this unit is never enabled at
+# boot. It is started deliberately, for a bounded experiment, under
+# supervision.
